@@ -19935,7 +19935,6 @@ __webpack_exports__ = __webpack_exports__["default"];
       'seconds=' + Math.round((o.nowMs - o.startMs) / 1000),
       'questions=' + o.log.length,
       'switches=' + (o.switches || 0),
-      'attempt=' + (o.attempt || 1),
       'version=' + (o.version || 1),
       'start=' + (sum.startLesson === null ? 'none' : sum.startLesson),
       'frontier=' + (sum.frontier === null ? 'none' : sum.frontier),
@@ -19978,7 +19977,7 @@ __webpack_exports__ = __webpack_exports__["default"];
     var prereqCount = prereqsToLearn(o.sum, o.lessons || []).length;
     var subject = tag + ' id=' + id + ' | name=' + clean(o.name, 40) + ' | start=' +
       (o.sum.startLesson === null ? 'none' : 'L' + o.sum.startLesson) + ' | prereqs=' + prereqCount +
-      ' | attempt=' + (o.attempt || 1);
+      ' | version=' + (o.version || 1);
     var maxAnswer = 24, body, mailto, sizes = [24, 10, 0];
     for (var k = 0; k < sizes.length; k++) {
       maxAnswer = sizes[k];
@@ -20029,8 +20028,7 @@ __webpack_exports__ = __webpack_exports__["default"];
   var MAX_FORM = S.max_form_retries === undefined ? 2 : parseInt(S.max_form_retries, 10);
   var SHOW_KEY = String(S.show_key_on_screen) === '1';
 
-  var student = { name: '', attempt: 1 };
-  var MAX_VERSION = Math.max(1, Engine.completeVersions(bank, S));
+  var student = { name: '' };
   var SKOOL_DM = S.skool_dm_url || 'https://www.skool.com/chat';
   var engine = null, log = [], examStart = 0, examActive = false;
   var cur = null;
@@ -20113,11 +20111,6 @@ __webpack_exports__ = __webpack_exports__["default"];
     var nameIn = el('input', { type: 'text', id: 'name', autocomplete: 'off', 'aria-label': 'Your name' });
     var err = el('div', { class: 'msg err' });
 
-    var ordinal = function (n) { return n + (n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10 > 3 ? 0 : n % 10]); };
-    var attemptSel = el('select', { id: 'attempt', 'aria-label': 'Attempt number' });
-    for (var a = 1; a <= MAX_VERSION; a++) { attemptSel.appendChild(el('option', { value: String(a), text: 'My ' + ordinal(a) + ' time taking this exam' })); }
-    attemptSel.appendChild(el('option', { value: '0', text: 'More than ' + MAX_VERSION + ' times' }));
-
     var limitText = LIMIT >= 60 && LIMIT % 60 === 0 ? (LIMIT / 60) + (LIMIT === 60 ? ' minute' : ' minutes') : LIMIT + ' seconds';
     var intro = el('ul', { class: 'rules intro' },
       el('li', { text: 'As mentioned in the lesson, I need you to be honest on this diagnostic exam and not use AI, the internet, a textbook, or a calculator. All numbers were deliberately made based on standardly memorized trigonometry and algebra you should already know. Cheating will only hurt yourself and bring down the quality of this course.' }),
@@ -20126,7 +20119,7 @@ __webpack_exports__ = __webpack_exports__["default"];
       LIMIT ? el('li', { text: 'There is a time limit of ' + limitText + ' for each question.' }) : null,
       el('li', { text: 'It will progressively get harder as you continue. Just do your best and if you don\'t know the answer, just say you don\'t know and skip the problem.' }),
       el('li', { text: 'You do not have to simplify your answers. Any correct form is accepted, so 2/sqrt(9) counts as 2/3, and you can leave an expression unexpanded as long as it is exactly right. Decimals only count when they are exactly right: 0.75 is fine for 3/4, but 0.667 is not fine for 2/3.' }),
-      el('li', { text: 'Once you have completed the exam, an email will automatically pop up with your diagnostic results already filled in. You just need to press send on that email. If the email can\'t send, just download the file and send it via direct message in Skool.' }),
+      el('li', { text: 'Once you have completed the exam, click "Open Gmail with the email filled in" and Gmail will open with your diagnostic results already filled in. You just need to press send on that email. If the email can\'t send, just download the file and send it via direct message in Skool.' }),
       el('li', { text: 'Check out the example interface below and good luck!' }));
 
     var howTo = el('ul', { class: 'rules' },
@@ -20146,21 +20139,18 @@ __webpack_exports__ = __webpack_exports__["default"];
       demoIn, demoOut,
       el('h2', { text: 'Before you begin' }),
       el('label', { for: 'name', text: 'Your name' }), nameIn,
-      el('label', { for: 'attempt', text: 'Which attempt is this?' }), attemptSel,
       err,
       el('div', { class: 'row' }, el('button', { class: 'primary', text: 'Begin the exam', onclick: function () {
         var name = nameIn.value.trim();
         if (!name) { err.textContent = 'Please enter your name.'; nameIn.focus(); return; }
         student.name = name;
-        student.attempt = parseInt(attemptSel.value, 10) || (MAX_VERSION + 1);
         begin();
       } }))));
     nameIn.focus({ preventScroll: true });
   }
 
   function begin() {
-    var version = student.attempt >= 1 && student.attempt <= MAX_VERSION ? student.attempt : 0;
-    engine = Engine.create(bank, S, null, version ? { version: version } : undefined);
+    engine = Engine.create(bank, S, null);
     log = []; examStart = Date.now(); blurs = 0; examActive = true;
     nextQuestion();
   }
@@ -20382,7 +20372,7 @@ __webpack_exports__ = __webpack_exports__["default"];
     var text = textReport(sum);
     var mail = Report.buildEmail({ name: student.name, startMs: examStart, nowMs: Date.now(), sum: sum, log: log,
                                    switches: blurs, settings: S, readable: text, lessons: bank.lessons,
-                                   attempt: student.attempt, version: engine.version });
+                                   version: engine.version });
 
     var placeBox = el('div', { class: 'big' });
     placement(sum).forEach(function (line) { placeBox.appendChild(el('p', { text: line, style: 'margin:.25em 0' })); });
@@ -20391,53 +20381,28 @@ __webpack_exports__ = __webpack_exports__["default"];
       el('h2', { text: 'Learn these prerequisites first' }),
       el('ol', { class: 'rules' }, pre.map(function (p) { return el('li', { text: prereqLine(p) }); }))) : null;
 
-    // ---- sending: the email opens by itself; other ways to send appear only if it did not open
-    var status = el('p', { class: 'send-status', 'aria-live': 'polite' });
+    // ---- sending: Gmail in a new tab is the main way; other ways stay one click away
     var copybox = el('textarea', { class: 'copybox', readonly: 'readonly', 'aria-label': 'Results text' });
     copybox.value = mail.fileText;
     var fallback = el('div', { class: 'fallback', hidden: 'hidden' },
-      el('p', { text: 'Your email app did not open, or the email would not send. Any of these will get your results to me:' }),
+      el('p', { text: 'No Gmail, or it would not send? Any of these will get your results to me:' }),
       el('div', { class: 'row' },
-        el('button', { text: 'Open Gmail with the email filled in', onclick: function () { window.open(mail.gmail, '_blank', 'noopener'); } }),
         el('button', { text: 'Copy results', onclick: function () {
           copybox.select();
           if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(mail.fileText).catch(function () {}); }
         } })),
       el('p', { class: 'small', text: 'Or use "Download Copy" above and send that file to me in a direct message on Skool ("Message Ken" opens Skool). You can also paste the text below into a message.' }),
       copybox);
-    var showMore = el('button', { class: 'linklike', type: 'button', text: 'Email did not open or would not send? Show other ways to send.',
+    var showMore = el('button', { class: 'linklike', type: 'button', text: 'No Gmail? Show other ways to send.',
       onclick: function () { fallback.hidden = false; showMore.hidden = true; } });
-    showMore.hidden = true;
-
-    function sendEmail() {
-      status.className = 'send-status';
-      status.textContent = 'Opening your email...';
-      var opened = false;
-      function onBlur() { opened = true; }
-      window.addEventListener('blur', onBlur);
-      var a = el('a', { href: mail.mailto });
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
-      setTimeout(function () {
-        window.removeEventListener('blur', onBlur);
-        if (opened) {
-          status.textContent = 'Your email should be open now. Press Send in that window. You only need to send it once.';
-          showMore.hidden = fallback.hidden ? false : true;
-        } else {
-          status.className = 'send-status warn';
-          status.textContent = 'Your email app did not open.';
-          fallback.hidden = false; showMore.hidden = true;
-        }
-      }, 2500);
-    }
 
     app.appendChild(el('div', { class: 'card' },
       el('h1', { text: TITLE + ': finished' }),
       el('p', { class: 'sub', text: student.name + '  ·  ' + fmtDate(new Date()) + '  ·  ' + log.length + ' questions in ' + clock(secs) }),
       el('h2', { text: 'Send your results' }),
-      el('p', { text: 'An email to ' + mail.to + ' should have opened with your results filled in. Press Send on it. If nothing opened, use the button below.' }),
-      status,
+      el('p', { text: 'Click the button below. Gmail opens in a new tab with an email to ' + mail.to + ' and your results filled in. Press Send on it.' }),
       el('div', { class: 'row' },
-        el('button', { class: 'primary', text: 'Open the email again', onclick: sendEmail }),
+        el('button', { class: 'primary', text: 'Open Gmail with the email filled in', onclick: function () { window.open(mail.gmail, '_blank', 'noopener'); } }),
         el('button', { text: 'Download Copy', onclick: function () { download('Diagnostic_' + safeName() + '.txt', mail.fileText, 'text/plain'); } }),
         el('button', { text: 'Message Ken', onclick: function () { window.open(SKOOL_DM, '_blank', 'noopener'); } })),
       showMore, fallback));
@@ -20454,7 +20419,6 @@ __webpack_exports__ = __webpack_exports__["default"];
       el('h2', { text: 'Your answers' }),
       el('table', null, el('tr', null, ['#', 'Where', 'Question', 'You typed'].concat(SHOW_KEY ? ['Key'] : [], ['Result', 'Time']).map(function (h) { return el('th', { text: h }); })), logRows)));
     window.scrollTo(0, 0);
-    sendEmail();
   }
 
   showStart();

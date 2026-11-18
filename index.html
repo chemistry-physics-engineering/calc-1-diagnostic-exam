@@ -20338,6 +20338,7 @@ __webpack_exports__ = __webpack_exports__["default"];
     var box = el('textarea', { class: 'copybox', readonly: 'readonly', 'aria-label': 'Your results' });
     box.value = res.json;
     var copied = el('span', { class: 'small', 'aria-live': 'polite' });
+    var fallback = el('p', { class: 'small', hidden: 'hidden', 'aria-live': 'polite', text: 'Didn\'t work? Send it to ' + res.to });
     app.appendChild(el('div', { class: 'card' },
       el('h1', { text: 'Send your results' }),
       el('p', { text: 'Copy the text below and send it to Ken, or press Email Ken.' }),
@@ -20349,8 +20350,9 @@ __webpack_exports__ = __webpack_exports__["default"];
             navigator.clipboard.writeText(res.json).then(function () { copied.textContent = 'Copied.'; }, function () { copied.textContent = 'Press Ctrl+C (or Cmd+C) to copy.'; });
           } else { copied.textContent = 'Press Ctrl+C (or Cmd+C) to copy.'; }
         } }),
-        el('button', { text: 'Email Ken', onclick: function () { window.open(res.gmail, '_blank', 'noopener'); } }),
-        copied)));
+        el('button', { text: 'Email Ken', onclick: function () { window.open(res.gmail, '_blank', 'noopener'); fallback.hidden = false; } }),
+        copied),
+      fallback));
     window.scrollTo(0, 0);
   }
 

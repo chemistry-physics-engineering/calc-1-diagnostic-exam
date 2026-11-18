@@ -19646,6 +19646,13 @@ __webpack_exports__ = __webpack_exports__["default"];
     }
   }
 
+  var PLAN = { mastered: 'Skip: five-minute review of the cue cards',
+               solid: 'Skip: five-minute review of the cue cards',
+               shaky: 'Skim the handout, then do the practice problems',
+               gap: 'Do the full lesson',
+               not_reached: 'Do the full lesson (not reached in this exam)',
+               untested: 'Not tested (question limit reached): do the full lesson' };
+
   function create(bank, userSettings, rng, opts) {
     var random = rng || Math.random;
     var settings = {};
@@ -19846,13 +19853,6 @@ __webpack_exports__ = __webpack_exports__["default"];
     }
 
     // ---------------------------------------------------------- summary
-    var PLAN = { mastered: 'Skip: five-minute review of the cue cards',
-                 solid: 'Skip: five-minute review of the cue cards',
-                 shaky: 'Skim the handout, then do the practice problems',
-                 gap: 'Do the full lesson',
-                 not_reached: 'Do the full lesson (not reached in this exam)',
-                 untested: 'Not tested (question limit reached): do the full lesson' };
-
     function summary() {
       var out = [], startLesson = null, i, l;
       for (i = 0; i < lessons.length; i++) {
@@ -19882,7 +19882,7 @@ __webpack_exports__ = __webpack_exports__["default"];
              count: function () { return asked.length; }, isFinished: function () { return phase === 'done'; } };
   }
 
-  return { create: create, completeVersions: completeVersions, DEFAULTS: DEFAULTS };
+  return { create: create, completeVersions: completeVersions, DEFAULTS: DEFAULTS, PLAN: PLAN };
 });
 
 </script>
@@ -19990,6 +19990,58 @@ __webpack_exports__ = __webpack_exports__["default"];
              fileText: 'To: ' + to + '\r\nSubject: ' + subject + '\r\n\r\n' + body + (o.readable ? '\r\n\r\n' + o.readable : '') };
   }
 
+  // ---- results JSON: what the student copies or emails; the teacher view (#report) reads it back
+  var LCODE = { mastered: 'm', solid: 's', shaky: 'h', gap: 'g', not_reached: 'n', untested: 'u' };
+  var LNAME = { m: 'mastered', s: 'solid', h: 'shaky', g: 'gap', n: 'not_reached', u: 'untested' };
+  var VCODE = { pass: 'p', fail: 'f', none: '-', retry: '?' };
+  var VNAME = { p: 'pass', f: 'fail', '-': 'none', '?': 'retry' };
+  var TNAME = { r: 'right', w: 'wrong', s: 'skipped' };
+  var EXAM = 'CALC1-DIAG';
+
+  function outcomeCode(r) { return r.outcome === 'correct' ? 'c' : (r.outcome === 'skip' ? (r.timedOut ? 't' : 's') : (r.unsimplified ? 'u' : 'w')); }
+
+  function buildResults(o) {
+    var to = (o.settings && o.settings.email_to) || DEFAULT_TO;
+    var tag = (o.settings && o.settings.subject_tag) || DEFAULT_TAG;
+    var id = makeId(o.nowMs, o.rng), foundations = {};
+    o.sum.topics.forEach(function (t) { if (t.status !== 'not asked') { foundations[t.code] = TOPIC[t.status]; } });
+    var data = {
+      exam: EXAM, format: 2, id: id, name: String(o.name || '').slice(0, 60),
+      date: new Date(o.nowMs).toISOString().replace(/\.\d+Z$/, 'Z'),
+      seconds: Math.round((o.nowMs - o.startMs) / 1000), switches: o.switches || 0, version: o.version || 1,
+      start: o.sum.startLesson, frontier: o.sum.frontier,
+      lessons: o.sum.lessons.map(function (l) {
+        return [l.n, LCODE[l.status] || 'u', l.levels.map(function (v) { return VCODE[v] || '-'; }).join('')];
+      }),
+      foundations: foundations,
+      log: o.log.map(function (r) { return [r.id, outcomeCode(r), r.seconds || 0, String(r.answer || '')]; })
+    };
+    var json = JSON.stringify(data);
+    var gmail = 'https://mail.google.com/mail/?view=cm&fs=1&to=' + enc(to) + '&su=' + enc(tag + ' ' + clean(o.name, 40)) + '&body=' + enc(json);
+    return { id: id, to: to, data: data, json: json, gmail: gmail };
+  }
+
+  function readResults(data, bank, plan) {
+    var titles = {}, byId = {}, f = data.foundations || {};
+    (bank.lessons || []).forEach(function (l) { titles[l.n] = l.title; });
+    (bank.items || []).forEach(function (i) { byId[i.id] = i; });
+    var lessons = (data.lessons || []).map(function (row) {
+      var st = LNAME[row[1]] || 'untested';
+      return { n: row[0], title: titles[row[0]] || ('Lesson ' + row[0]), status: st, plan: (plan || {})[st] || '',
+               levels: String(row[2] || '---').split('').map(function (c) { return VNAME[c] || 'none'; }) };
+    });
+    var topics = (bank.topics || []).map(function (t) {
+      return { code: t.code, name: t.name, packet: t.packet, status: f[t.code] ? (TNAME[f[t.code]] || 'wrong') : 'not asked' };
+    });
+    var log = (data.log || []).map(function (r) {
+      var it = byId[r[0]] || {}, o = r[1];
+      return { id: r[0], lesson: it.lesson, level: it.level, topic: it.topic, seconds: r[2], answer: r[3] || '',
+               outcome: o === 'c' ? 'correct' : ((o === 's' || o === 't') ? 'skip' : 'wrong'), timedOut: o === 't', unsimplified: o === 'u' };
+    });
+    return { sum: { lessons: lessons, topics: topics, startLesson: data.start === undefined ? null : data.start,
+                    frontier: data.frontier === undefined ? null : data.frontier }, log: log };
+  }
+
   function parseBody(text) {
     var start = text.indexOf(VERSION), end = text.indexOf(END);
     if (start < 0 || end < 0) { return null; }
@@ -20005,7 +20057,7 @@ __webpack_exports__ = __webpack_exports__["default"];
     return out;
   }
 
-  return { buildEmail: buildEmail, parseBody: parseBody, makeId: makeId, prereqsToLearn: prereqsToLearn, lessonList: lessonList,
+  return { buildEmail: buildEmail, buildResults: buildResults, readResults: readResults, parseBody: parseBody, makeId: makeId, prereqsToLearn: prereqsToLearn, lessonList: lessonList,
            MAX_URL: MAX_URL, DEFAULT_TO: DEFAULT_TO, DEFAULT_TAG: DEFAULT_TAG };
 });
 
@@ -20084,20 +20136,9 @@ __webpack_exports__ = __webpack_exports__["default"];
   });
 
   // ------------------------------------------------------------------ start screen
-  var HOWTO = [
-    ['3/4', 'number'], ['sqrt(3)/2', 'number'], ['12pi', 'number'], ['ln(5)/2', 'number'],
-    ['x^2+1', 'expr'], ['e^(2x)', 'expr'], ['(x+1)/(x-2)', 'expr'], ['1/(2sqrt(x))', 'expr'],
-    ['3, -1/2', 'set'], ['[-3,1] U (2,inf)', 'interval'], ['inf', 'number'], ['DNE', 'number']
-  ];
-
   function showStart() {
     clear(app);
-    var rows = HOWTO.map(function (r) {
-      var p = Grader.preview({ type: r[1], vars: 'x' }, r[0]);
-      var shown = r[0] === 'DNE' ? el('span', { text: 'does not exist' }) : mathSpan(p.tex || r[0]);
-      return el('tr', null, el('td', { text: r[0] }), el('td', null, shown));
-    });
-    var demoIn = el('input', { type: 'text', class: 'answer', 'aria-label': 'Practice box', placeholder: 'x^2 - sqrt(3)/2',
+    var demoIn = el('input', { type: 'text', class: 'answer', id: 'demo', placeholder: 'x^2 - sqrt(3)/2',
                                autocomplete: 'off', spellcheck: 'false' });
     var demoOut = el('div', { class: 'preview' });
     function demoUpdate() {
@@ -20108,37 +20149,20 @@ __webpack_exports__ = __webpack_exports__["default"];
     }
     demoIn.addEventListener('input', demoUpdate); demoUpdate();
 
-    var nameIn = el('input', { type: 'text', id: 'name', autocomplete: 'off', 'aria-label': 'Your name' });
+    var nameIn = el('input', { type: 'text', id: 'name', autocomplete: 'off' });
     var err = el('div', { class: 'msg err' });
-
     var limitText = LIMIT >= 60 && LIMIT % 60 === 0 ? (LIMIT / 60) + (LIMIT === 60 ? ' minute' : ' minutes') : LIMIT + ' seconds';
-    var intro = el('ul', { class: 'rules intro' },
-      el('li', { text: 'As mentioned in the lesson, I need you to be honest on this diagnostic exam and not use AI, the internet, a textbook, or a calculator. All numbers were deliberately made based on standardly memorized trigonometry and algebra you should already know. Cheating will only hurt yourself and bring down the quality of this course.' }),
-      el('li', { text: 'What you should have before you start is a pencil, eraser, and an ample amount of paper.' }),
-      el('li', { text: 'This exam uses JavaScript, so make sure you have JavaScript enabled. I also intended this for Chrome. Reach out to me for any technical difficulties.' }),
-      LIMIT ? el('li', { text: 'There is a time limit of ' + limitText + ' for each question.' }) : null,
-      el('li', { text: 'It will progressively get harder as you continue. Just do your best and if you don\'t know the answer, just say you don\'t know and skip the problem.' }),
-      el('li', { text: 'You do not have to simplify your answers. Any correct form is accepted, so 2/sqrt(9) counts as 2/3, and you can leave an expression unexpanded as long as it is exactly right. Decimals only count when they are exactly right: 0.75 is fine for 3/4, but 0.667 is not fine for 2/3.' }),
-      el('li', { text: 'Once you have completed the exam, click "Open Gmail with the email filled in" and Gmail will open with your diagnostic results already filled in. You just need to press send on that email. If the email can\'t send, just download the file and send it via direct message in Skool.' }),
-      el('li', { text: 'Check out the example interface below and good luck!' }));
-
-    var howTo = el('ul', { class: 'rules' },
-      el('li', { text: 'Use ^ for powers, like x^2.' }),
-      el('li', { text: 'Use sqrt(x) for square roots, pi for π, ln(x) for the natural log, and inf for infinity.' }),
-      el('li', { text: 'Multiply by putting terms next to each other, like 2x.' }),
-      el('li', { text: 'Type DNE when a limit does not exist.' }),
-      el('li', { text: 'When a question wants more than one answer, separate them with commas.' }));
 
     app.appendChild(el('div', { class: 'card' },
       el('h1', { text: TITLE }),
-      intro,
-      el('h2', { text: 'How to type answers' }),
-      howTo,
-      el('table', { class: 'demo' }, el('tr', null, el('th', { text: 'You type' }), el('th', { text: 'It means' })), rows),
-      el('h2', { text: 'Try the answer box' }),
+      el('ul', { class: 'rules' },
+        el('li', { text: 'Use only pencil and paper. No calculator, AI, internet or books.' }),
+        el('li', { text: (LIMIT ? 'You have ' + limitText + ' per question. ' : '') + 'If you are stuck, press "I don\'t know".' }),
+        el('li', { text: 'At the end, copy your results and send them to Ken.' }))));
+    app.appendChild(el('div', { class: 'card' },
+      el('label', { for: 'demo', style: 'margin-top:0', text: 'Try typing answers before the exam.' }),
       demoIn, demoOut,
-      el('h2', { text: 'Before you begin' }),
-      el('label', { for: 'name', text: 'Your name' }), nameIn,
+      el('label', { for: 'name', style: 'margin-top:22px', text: 'Your name' }), nameIn,
       err,
       el('div', { class: 'row' }, el('button', { class: 'primary', text: 'Begin the exam', onclick: function () {
         var name = nameIn.value.trim();
@@ -20174,7 +20198,7 @@ __webpack_exports__ = __webpack_exports__["default"];
 
   function nextQuestion() {
     var item = engine.next();
-    if (!item) { examActive = false; showReport(); return; }
+    if (!item) { examActive = false; showDone(); return; }
     showQuestion(item, engine.count() + 1);
   }
 
@@ -20305,44 +20329,50 @@ __webpack_exports__ = __webpack_exports__["default"];
 
   function fmtDate(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()); }
 
-  function textReport(sum) {
-    var secs = Math.round((Date.now() - examStart) / 1000);
-    var out = [TITLE, 'Name: ' + student.name, 'Date: ' + fmtDate(new Date()),
-      'Time used: ' + clock(secs) + '   Questions: ' + log.length + '   Window switches: ' + blurs, ''];
-    placement(sum).forEach(function (l) { out.push(l); });
-    var pre = Report.prereqsToLearn(sum, bank.lessons);
-    if (pre.length) {
-      out.push('', 'PREREQUISITES TO LEARN FIRST (in this order)');
-      pre.forEach(function (p, i) { out.push('  ' + (i + 1) + '. ' + prereqLine(p)); });
-    }
-    out.push('', 'LESSONS', '  (rungs: 1 recognition, 2 core skill, 3 twist;  ✓ right, ✗ missed, · not asked)');
-    sum.lessons.forEach(function (l) {
-      out.push('  Lesson ' + pad(l.n) + '  ' + (STATUS_LABEL[l.status] + '            ').slice(0, 12) + evidence(l) + '   ' + lessonTitle[l.n] + '  -> ' + l.plan + (cause(l, sum) ? '  (' + cause(l, sum) + ')' : ''));
-    });
-    out.push('', 'FOUNDATIONS');
-    sum.topics.forEach(function (t) {
-      if (t.status !== 'not asked') { out.push('  ' + t.code + '  ' + t.status + '  ' + t.name + (t.status === 'right' ? '' : '  -> ' + t.packet)); }
-    });
-    out.push('', 'QUESTION LOG (question id, what you typed, result, seconds)');
-    log.forEach(function (r, i) {
-      out.push('  ' + (i + 1) + '. ' + r.id + '  "' + r.answer + '"  ' + r.outcome + (r.timedOut ? ' (timed out)' : '') + (r.unsimplified ? ' (not simplified)' : '') + '  ' + r.seconds + 's');
-    });
-    return out.join('\n');
-  }
-
-  function download(name, text, mime) {
-    var blob = new Blob([text], { type: mime });
-    var a = el('a', { href: URL.createObjectURL(blob), download: name });
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
-  }
-  function safeName() { return student.name.replace(/[^A-Za-z0-9 _-]/g, '').trim().replace(/\s+/g, '_') || 'student'; }
-
-  function showReport() {
+  // ------------------------------------------------------------------ student end screen: just the results JSON
+  function showDone() {
     clear(app);
-    var sum = engine.summary();
-    var secs = Math.round((Date.now() - examStart) / 1000);
+    var res = Report.buildResults({ name: student.name, startMs: examStart, nowMs: Date.now(), sum: engine.summary(), log: log,
+                                    switches: blurs, settings: S, version: engine.version });
+    var box = el('textarea', { class: 'copybox', readonly: 'readonly', 'aria-label': 'Your results' });
+    box.value = res.json;
+    var copied = el('span', { class: 'small', 'aria-live': 'polite' });
+    app.appendChild(el('div', { class: 'card' },
+      el('h1', { text: 'Send your results' }),
+      el('p', { text: 'Copy the text below and send it to Ken, or press Email Ken.' }),
+      box,
+      el('div', { class: 'row', style: 'margin-top:10px' },
+        el('button', { class: 'primary', text: 'Copy', onclick: function () {
+          box.focus(); box.select();
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(res.json).then(function () { copied.textContent = 'Copied.'; }, function () { copied.textContent = 'Press Ctrl+C (or Cmd+C) to copy.'; });
+          } else { copied.textContent = 'Press Ctrl+C (or Cmd+C) to copy.'; }
+        } }),
+        el('button', { text: 'Email Ken', onclick: function () { window.open(res.gmail, '_blank', 'noopener'); } }),
+        copied)));
+    window.scrollTo(0, 0);
+  }
 
+  // ------------------------------------------------------------------ teacher view (#report): paste a student's results
+  function showViewer() {
+    clear(app);
+    var input = el('textarea', { class: 'copybox', id: 'paste', 'aria-label': 'Student results', placeholder: '{"exam":"CALC1-DIAG", ...}' });
+    var err = el('div', { class: 'msg err' });
+    var out = el('div');
+    app.appendChild(el('div', { class: 'card' },
+      el('h1', { text: 'Read a result' }),
+      el('label', { for: 'paste', text: 'Paste the student\'s results' }), input, err,
+      el('div', { class: 'row', style: 'margin-top:10px' }, el('button', { class: 'primary', text: 'Show report', onclick: function () {
+        var raw = input.value, a = raw.indexOf('{'), b = raw.lastIndexOf('}'), d = null;
+        try { d = JSON.parse(raw.slice(a, b + 1)); } catch (e) { d = null; }
+        if (!d || d.exam !== 'CALC1-DIAG') { err.textContent = 'That does not look like results from this exam.'; return; }
+        err.textContent = ''; clear(out); out.appendChild(renderReport(d));
+      } }))));
+    app.appendChild(out);
+  }
+
+  function renderReport(d) {
+    var r = Report.readResults(d, bank, Engine.PLAN), sum = r.sum, rlog = r.log;
     var lessonRows = sum.lessons.map(function (l) {
       return el('tr', null,
         el('td', { text: String(l.n) }),
@@ -20357,71 +20387,39 @@ __webpack_exports__ = __webpack_exports__["default"];
         el('td', null, chip(t.status === 'right' ? 'right' : (t.status === 'skipped' ? 'skipped' : 'wrong'), t.status === 'right' ? 'Right' : (t.status === 'skipped' ? 'Skipped' : 'Missed'))),
         el('td', { class: 'small', text: t.status === 'right' ? '' : t.packet }));
     });
-    var logRows = log.map(function (r, i) {
-      var item = byId[r.id] || {};
-      var qCell = rich(el('td', { class: 'tex' }), item.prompt || r.id);
-      var cells = [el('td', { text: String(i + 1) }), el('td', { class: 'small', text: r.lesson ? 'Lesson ' + r.lesson + ', rung ' + r.level : 'Foundations' }),
-        qCell, el('td', { text: r.answer || '(no answer)' }),
-        el('td', null, chip(r.outcome === 'correct' ? 'right' : (r.outcome === 'skip' ? 'skipped' : 'wrong'),
-          r.outcome === 'correct' ? 'Right' : (r.outcome === 'skip' ? (r.timedOut ? 'Timed out' : 'Skipped') : (r.unsimplified ? 'Not simplified' : 'Missed')))),
-        el('td', { class: 'small', text: r.seconds + 's' })];
-      if (SHOW_KEY) { cells.splice(4, 0, el('td', { class: 'tex' }, mathSpan(Grader.keyTex(item)))); }
-      return el('tr', null, cells);
+    var logRows = rlog.map(function (x, i) {
+      var item = byId[x.id] || {};
+      return el('tr', null,
+        el('td', { text: String(i + 1) }),
+        el('td', { class: 'small', text: x.lesson ? 'Lesson ' + x.lesson + ', rung ' + x.level : 'Foundations' }),
+        rich(el('td', { class: 'tex' }), item.prompt || x.id),
+        el('td', { text: x.answer || '(no answer)' }),
+        el('td', { class: 'tex' }, item.id ? mathSpan(Grader.keyTex(item)) : null),
+        el('td', null, chip(x.outcome === 'correct' ? 'right' : (x.outcome === 'skip' ? 'skipped' : 'wrong'),
+          x.outcome === 'correct' ? 'Right' : (x.outcome === 'skip' ? (x.timedOut ? 'Timed out' : 'Skipped') : (x.unsimplified ? 'Not simplified' : 'Missed')))),
+        el('td', { class: 'small', text: x.seconds + 's' }));
     });
-
-    var text = textReport(sum);
-    var mail = Report.buildEmail({ name: student.name, startMs: examStart, nowMs: Date.now(), sum: sum, log: log,
-                                   switches: blurs, settings: S, readable: text, lessons: bank.lessons,
-                                   version: engine.version });
-
     var placeBox = el('div', { class: 'big' });
     placement(sum).forEach(function (line) { placeBox.appendChild(el('p', { text: line, style: 'margin:.25em 0' })); });
     var pre = Report.prereqsToLearn(sum, bank.lessons);
-    var prereqBox = pre.length ? el('div', null,
-      el('h2', { text: 'Learn these prerequisites first' }),
-      el('ol', { class: 'rules' }, pre.map(function (p) { return el('li', { text: prereqLine(p) }); }))) : null;
-
-    // ---- sending: Gmail in a new tab is the main way; other ways stay one click away
-    var copybox = el('textarea', { class: 'copybox', readonly: 'readonly', 'aria-label': 'Results text' });
-    copybox.value = mail.fileText;
-    var fallback = el('div', { class: 'fallback', hidden: 'hidden' },
-      el('p', { text: 'No Gmail, or it would not send? Any of these will get your results to me:' }),
-      el('div', { class: 'row' },
-        el('button', { text: 'Copy results', onclick: function () {
-          copybox.select();
-          if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(mail.fileText).catch(function () {}); }
-        } })),
-      el('p', { class: 'small', text: 'Or use "Download Copy" above and send that file to me in a direct message on Skool ("Message Ken" opens Skool). You can also paste the text below into a message.' }),
-      copybox);
-    var showMore = el('button', { class: 'linklike', type: 'button', text: 'No Gmail? Show other ways to send.',
-      onclick: function () { fallback.hidden = false; showMore.hidden = true; } });
-
-    app.appendChild(el('div', { class: 'card' },
-      el('h1', { text: TITLE + ': finished' }),
-      el('p', { class: 'sub', text: student.name + '  ·  ' + fmtDate(new Date()) + '  ·  ' + log.length + ' questions in ' + clock(secs) }),
-      el('h2', { text: 'Send your results' }),
-      el('p', { text: 'Click the button below. Gmail opens in a new tab with an email to ' + mail.to + ' and your results filled in. Press Send on it.' }),
-      el('div', { class: 'row' },
-        el('button', { class: 'primary', text: 'Open Gmail with the email filled in', onclick: function () { window.open(mail.gmail, '_blank', 'noopener'); } }),
-        el('button', { text: 'Download Copy', onclick: function () { download('Diagnostic_' + safeName() + '.txt', mail.fileText, 'text/plain'); } }),
-        el('button', { text: 'Message Ken', onclick: function () { window.open(SKOOL_DM, '_blank', 'noopener'); } })),
-      showMore, fallback));
-
-    app.appendChild(el('div', { class: 'card' },
-      el('h1', { text: 'Your results' }),
+    return el('div', { class: 'card' },
+      el('h1', { text: d.name || '(no name)' }),
+      el('p', { class: 'sub', text: String(d.date || '').replace('T', ' ').replace('Z', ' UTC') + '  ·  ' + rlog.length + ' questions in ' + clock(d.seconds || 0) +
+        '  ·  ' + (d.switches || 0) + ' window switches  ·  version ' + d.version + '  ·  id ' + d.id }),
       placeBox,
-      prereqBox,
+      pre.length ? el('h2', { text: 'Prerequisites to learn first' }) : null,
+      pre.length ? el('ol', { class: 'rules' }, pre.map(function (p) { return el('li', { text: prereqLine(p) }); })) : null,
       el('h2', { text: 'Lessons' }),
       el('p', { class: 'small', text: 'Rungs: 1 = recognition, 2 = core skill, 3 = a twist. ✓ right, ✗ missed, · not asked.' }),
       el('table', null, el('tr', null, ['#', 'Lesson', 'Result', 'What to do', 'Rungs'].map(function (h) { return el('th', { text: h }); })), lessonRows),
       asked.length ? el('h2', { text: 'Foundations' }) : null,
       asked.length ? el('table', null, el('tr', null, ['Code', 'Topic', 'Result', 'Where to study'].map(function (h) { return el('th', { text: h }); })), topicRows) : null,
-      el('h2', { text: 'Your answers' }),
-      el('table', null, el('tr', null, ['#', 'Where', 'Question', 'You typed'].concat(SHOW_KEY ? ['Key'] : [], ['Result', 'Time']).map(function (h) { return el('th', { text: h }); })), logRows)));
-    window.scrollTo(0, 0);
+      el('h2', { text: 'Answers' }),
+      el('table', null, el('tr', null, ['#', 'Where', 'Question', 'Typed', 'Correct', 'Result', 'Time'].map(function (h) { return el('th', { text: h }); })), logRows));
   }
 
-  showStart();
+  if (location.hash === '#report') { showViewer(); } else { showStart(); }
+  window.addEventListener('hashchange', function () { if (location.hash === '#report' && !examActive) { showViewer(); } });
 })();
 
 </script>

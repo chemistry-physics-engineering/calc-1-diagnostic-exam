@@ -20156,9 +20156,10 @@ __webpack_exports__ = __webpack_exports__["default"];
     app.appendChild(el('div', { class: 'card' },
       el('h1', { text: TITLE }),
       el('ul', { class: 'rules' },
-        el('li', { text: 'Use only pencil and paper. No calculator, AI, internet or books.' }),
-        el('li', { text: (LIMIT ? 'You have ' + limitText + ' per question. ' : '') + 'If you are stuck, press "I don\'t know".' }),
-        el('li', { text: 'At the end, copy your results and send them to Ken.' }))));
+        el('li', { text: 'Use pencil and paper. No calculator, AI, internet or books.' }),
+        LIMIT ? el('li', { text: 'You have ' + limitText + ' per question.' }) : null,
+        el('li', { text: 'If you are stuck, press "I don\'t know".' }),
+        el('li', { text: 'At the end, copy your results and send them to the email.' }))));
     app.appendChild(el('div', { class: 'card' },
       el('label', { for: 'demo', style: 'margin-top:0', text: 'Try typing answers before the exam.' }),
       demoIn, demoOut,
